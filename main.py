@@ -313,7 +313,7 @@ class JlcOrderPlugin(Star):
 
 
     def _login_admin(self, event: AstrMessageEvent) -> bool:
-        admin_id = str(self.config.get("notify_user_id") or "").strip()
+        admin_id = str(self.config.get("admin_user_id") or "").strip()
         sender_id = str(event.get_sender_id() or "").strip()
         return bool(admin_id and sender_id == admin_id)
 
@@ -321,11 +321,11 @@ class JlcOrderPlugin(Star):
     async def cmd_login(self, event: AstrMessageEvent):
         """向配置的管理员私聊发送一次性网页登录入口"""
         if not self._login_admin(event):
-            yield event.plain_result("无权发起登录。请先在插件配置中填写自己的 QQ 号（notify_user_id），并使用该账号操作。")
+            yield event.plain_result("无权发起登录。请先在插件配置中填写自己的 QQ 号（admin_user_id），并使用该账号操作。")
             return
         try:
             url = await self._login.start()
-            admin_id = str(self.config.get("notify_user_id")).strip()
+            admin_id = str(self.config.get("admin_user_id")).strip()
             await self.context.send_message(
                 f"aiocqhttp:FriendMessage:{admin_id}",
                 MessageChain([Plain("嘉立创临时登录入口（仅本人使用，勿转发）：\n" + url)]),
