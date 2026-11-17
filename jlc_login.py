@@ -79,6 +79,8 @@ class JlcWebLogin:
         self.token = token
 
     async def _capture_token(self):
+        if self.get_saved_token():
+            return True
         if not self.page or self.page.is_closed():
             self.last_error = "远程浏览器页面不存在或已关闭"
             return False
@@ -120,6 +122,23 @@ class JlcWebLogin:
         except Exception as exc:
             self.last_error = f"解析请求头失败：{type(exc).__name__}: {exc}"
 
+    def _on_request_failed(self, request):
+        try:
+            failure = request.failure or "未知网络错误"
+            self.last_error = f"请求失败：{request.method} {request.url.split('?')[0][:120]}；{failure}"
+            self.last_event = "嘉立创页面请求失败"
+        except Exception as exc:
+            self.last_error = f"读取请求失败信息异常：{exc}"
+
+    def _on_response(self, response):
+        try:
+            if "m.jlc.com/api/" in response.url and response.status in (401, 403):
+                self.last_error = f"嘉立创 API 返回 HTTP {response.status}：{response.url.split('?')[0][:140]}"
+                self.last_event = "登录可能失效或接口拒绝访问"
+                asyncio.create_task(self._notify("⚠️ 嘉立创登录请求被拒绝（HTTP " + str(response.status) + "）。请确认账号登录状态；若订单接口持续失败，请重新执行 /jlc登录。"))
+        except Exception as exc:
+            self.last_error = f"解析接口响应失败：{type(exc).__name__}: {exc}"
+
     async def start(self) -> str:
         async with self._lock:
             if self.runner:
@@ -150,6 +169,8 @@ class JlcWebLogin:
                     os.chmod(self.profile_dir, 0o700)
                 self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
                 self.page.on("request", self._on_request)
+                self.page.on("requestfailed", self._on_request_failed)
+                self.page.on("response", self._on_response)
                 await self.page.goto("https://m.jlc.com/", wait_until="domcontentloaded", timeout=60000)
                 self.last_event = "嘉立创页面已打开，等待登录和订单请求"
 
