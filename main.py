@@ -11,6 +11,8 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.api.message_components import Plain
 
+from .jlc_login import JlcWebLogin
+
 
 ORDER_LIST_URL = "https://m.jlc.com/api/overseas-pcb-order/order/getOrderPageList"
 
@@ -31,6 +33,7 @@ class JlcOrderPlugin(Star):
         self._data_dir = Path("data") / "plugins_data" / "astrbot_plugin_jlc_order"
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._state_file = self._data_dir / "last_state.json"
+        self._login = JlcWebLogin(self._data_dir)
         self._load_state()
 
     def _load_state(self):
@@ -69,10 +72,14 @@ class JlcOrderPlugin(Star):
                 await self._task
             except asyncio.CancelledError:
                 pass
+        await self._login.close()
         logger.info("[jlc_order] 定时查询任务已停止")
 
+    def _get_access_token(self) -> str:
+        return self._login.get_saved_token() or (self.config.get("access_token") or "").strip()
+
     def _get_headers(self) -> Dict[str, str]:
-        token = (self.config.get("access_token") or "").strip()
+        token = self._get_access_token()
         return {
             "User-Agent": (
                 "Mozilla/5.0 (Linux; Android 13; Mobile) "
@@ -87,9 +94,9 @@ class JlcOrderPlugin(Star):
         }
 
     async def _fetch_orders(self) -> List[Dict[str, Any]]:
-        token = (self.config.get("access_token") or "").strip()
+        token = self._get_access_token()
         if not token:
-            raise ValueError("未配置 access_token，请在插件设置中填写嘉立创 AccessToken")
+            raise ValueError("尚未登录嘉立创。请私聊机器人发送 /jlc登录，或在插件设置中填写备用 AccessToken。")
 
         status = self.config.get("order_status") or "waitSend"
         params = {
@@ -288,7 +295,7 @@ class JlcOrderPlugin(Star):
         interval = self.config.get("interval_minutes", 40)
         group_id = self.config.get("notify_group_id") or "（未设置）"
         user_id = self.config.get("notify_user_id") or "（未设置）"
-        has_token = bool((self.config.get("access_token") or "").strip())
+        has_token = bool(self._get_access_token())
         running = self._task is not None and not self._task.done()
 
         text = (
@@ -299,6 +306,54 @@ class JlcOrderPlugin(Star):
             f"推送群: {group_id}\n"
             f"推送私聊: {user_id}\n"
             f"Token: {'已配置' if has_token else '未配置'}\n"
+            f"认证来源: {'网页登录' if self._login.get_saved_token() else ('手动配置' if (self.config.get('access_token') or '').strip() else '未登录')}\n"
             f"仅变化推送: {'是' if self.config.get('only_on_change', True) else '否'}"
         )
         yield event.plain_result(text)
+
+
+    def _login_admin(self, event: AstrMessageEvent) -> bool:
+        admin_id = str(self.config.get("notify_user_id") or "").strip()
+        sender_id = str(event.get_sender_id() or "").strip()
+        return bool(admin_id and sender_id == admin_id)
+
+    @filter.command("jlc登录")
+    async def cmd_login(self, event: AstrMessageEvent):
+        """向配置的管理员私聊发送一次性网页登录入口"""
+        if not self._login_admin(event):
+            yield event.plain_result("无权发起登录。请先在插件配置中填写自己的 QQ 号（notify_user_id），并使用该账号操作。")
+            return
+        try:
+            url = await self._login.start()
+            admin_id = str(self.config.get("notify_user_id")).strip()
+            await self.context.send_message(
+                f"aiocqhttp:FriendMessage:{admin_id}",
+                MessageChain([Plain("嘉立创临时登录入口（仅本人使用，勿转发）：\n" + url)]),
+            )
+            yield event.plain_result("已将临时网页登录入口私聊发送给你。请通过 Tailscale 打开链接，完成登录后点击页面底部的“完成登录并保存凭证”。")
+        except Exception as e:
+            logger.exception("[jlc_order] 启动网页登录失败")
+            yield event.plain_result(f"无法启动网页登录：{e}")
+
+    @filter.command("jlc登录状态")
+    async def cmd_login_status(self, event: AstrMessageEvent):
+        if not self._login_admin(event):
+            yield event.plain_result("无权查看登录状态。")
+            return
+        saved = bool(self._login.get_saved_token())
+        manual = bool((self.config.get("access_token") or "").strip())
+        browser = self._login.context is not None
+        yield event.plain_result(
+            "嘉立创认证状态\n"
+            f"网页登录凭证：{'已保存' if saved else '未保存'}\n"
+            f"手动备用 Token：{'已配置' if manual else '未配置'}\n"
+            f"临时浏览器：{'运行中' if browser else '已关闭'}"
+        )
+
+    @filter.command("jlc退出登录")
+    async def cmd_logout(self, event: AstrMessageEvent):
+        if not self._login_admin(event):
+            yield event.plain_result("无权执行退出登录。")
+            return
+        await self._login.logout()
+        yield event.plain_result("已清除插件保存的嘉立创网页登录凭证和浏览器会话。手动配置的备用 Token 不受影响。")
