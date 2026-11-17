@@ -21,7 +21,7 @@ ORDER_LIST_URL = "https://m.jlc.com/api/overseas-pcb-order/order/getOrderPageLis
     "astrbot_plugin_jlc_order",
     "shimokin1208",
     "定时查询嘉立创 PCB/FPC 订单进度并推送到 QQ",
-    "1.0.0",
+    "1.1.0",
 )
 class JlcOrderPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
