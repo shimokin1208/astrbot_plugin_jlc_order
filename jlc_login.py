@@ -26,6 +26,26 @@ class JlcWebLogin:
         self.page = None
         self.token: Optional[str] = None
         self._lock = asyncio.Lock()
+        self.last_error = ""
+        self.last_event = "尚未开始登录"
+        self.capture_count = 0
+        self.notify_callback = None
+
+    async def _notify(self, message: str):
+        if self.notify_callback:
+            try:
+                await self.notify_callback(message)
+            except Exception:
+                pass
+
+    def status_text(self) -> str:
+        return (
+            f"浏览器：{'运行中' if self.context else '未运行'}\n"
+            f"Token：{'已捕获' if self.get_saved_token() else '未捕获'}\n"
+            f"捕获次数：{self.capture_count}\n"
+            f"最近状态：{self.last_event}\n"
+            f"最近错误：{self.last_error or '无'}"
+        )
 
     @staticmethod
     def _tailscale_ip() -> str:
@@ -59,30 +79,46 @@ class JlcWebLogin:
         self.token = token
 
     async def _capture_token(self):
-        if self.page and not self.page.is_closed():
-            try:
-                found = await self.page.evaluate("""() => {
-                    const keys = ['X-JLC-AccessToken', 'x-jlc-accesstoken',
-                                  'accessToken', 'access_token', 'token'];
-                    for (const key of keys) {
+        if not self.page or self.page.is_closed():
+            self.last_error = "远程浏览器页面不存在或已关闭"
+            return False
+        try:
+            found = await self.page.evaluate("""() => {
+                const keys = ['X-JLC-AccessToken', 'x-jlc-accesstoken',
+                              'accessToken', 'access_token', 'token'];
+                for (const key of keys) {
+                    try {
                         const value = localStorage.getItem(key) || sessionStorage.getItem(key);
                         if (value) return value.replace(/^Bearer\\s+/i, '');
-                    }
-                    return '';
-                }""")
-                if found and isinstance(found, str):
-                    self._save_token(found.strip())
-            except Exception:
-                pass
+                    } catch (_) {}
+                }
+                return '';
+            }""")
+            if found and isinstance(found, str):
+                self._save_token(found.strip())
+                self.last_event = "从网页存储中捕获到 Token"
+                self.last_error = ""
+                return True
+            self.last_event = "已检查网页存储，未发现 Token"
+            return False
+        except Exception as exc:
+            self.last_error = f"读取网页存储失败：{type(exc).__name__}: {exc}"
+            self.last_event = "网页存储检查失败"
+            return False
 
     def _on_request(self, request):
         try:
             headers = request.headers
             token = headers.get("x-jlc-accesstoken") or headers.get("X-JLC-AccessToken")
             if token:
-                self._save_token(token.removeprefix("Bearer ").strip())
-        except Exception:
-            pass
+                value = token.removeprefix("Bearer ").strip()
+                if value:
+                    self._save_token(value)
+                    self.capture_count += 1
+                    self.last_event = f"已从请求头捕获 Token（请求：{request.method} {request.url.split('?')[0][:160]}）"
+                    self.last_error = ""
+        except Exception as exc:
+            self.last_error = f"解析请求头失败：{type(exc).__name__}: {exc}"
 
     async def start(self) -> str:
         async with self._lock:
@@ -97,6 +133,8 @@ class JlcWebLogin:
                     "uv run playwright install chromium"
                 ) from exc
 
+            self.last_error = ""
+            self.last_event = "正在检查 Tailscale 网络"
             self.host = self._tailscale_ip()
             self.data_dir.mkdir(parents=True, exist_ok=True)
             self.playwright = await async_playwright().start()
@@ -113,8 +151,10 @@ class JlcWebLogin:
                 self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
                 self.page.on("request", self._on_request)
                 await self.page.goto("https://m.jlc.com/", wait_until="domcontentloaded", timeout=60000)
+                self.last_event = "嘉立创页面已打开，等待登录和订单请求"
 
                 app = web.Application(client_max_size=1024 * 1024)
+                app.router.add_get("/status", self._status)
                 app.router.add_get("/", self._index)
                 app.router.add_get("/screen", self._screen)
                 app.router.add_post("/click", self._click)
@@ -131,9 +171,11 @@ class JlcWebLogin:
                 await site.start()
                 self.runner, self.site = runner, site
                 return f"http://{self.host}:{self.port}/?key={self.key}"
-            except Exception:
+            except Exception as exc:
+                self.last_error = f"{type(exc).__name__}: {exc}"
+                self.last_event = "网页登录启动失败"
                 await self.close()
-                raise
+                raise RuntimeError(f"网页登录启动失败：{self.last_error}") from exc
 
     def _authorized(self, request):
         return secrets.compare_digest(request.query.get("key", ""), self.key)
@@ -142,6 +184,18 @@ class JlcWebLogin:
         if not self._authorized(request):
             raise web.HTTPForbidden(text="Invalid login link")
         return web.Response(text=PAGE, content_type="text/html")
+
+    async def _status(self, request):
+        if not self._authorized(request):
+            raise web.HTTPForbidden()
+        await self._capture_token()
+        return web.json_response({
+            "token": bool(self.get_saved_token()),
+            "capture_count": self.capture_count,
+            "event": self.last_event,
+            "error": self.last_error,
+            "browser": bool(self.context),
+        })
 
     async def _screen(self, request):
         if not self._authorized(request):
@@ -208,10 +262,18 @@ class JlcWebLogin:
         await self._capture_token()
         found = bool(self.get_saved_token())
         if found:
+            self.last_event = "登录凭证捕获成功"
+            self.last_error = ""
+            message = "嘉立创登录成功：AccessToken 已捕获并保存，临时浏览器入口已关闭。"
+            await self._notify(message)
             await self.close(keep_server=True)
             asyncio.create_task(self._stop_server())
-            return web.json_response({"ok": True, "message": "凭证已保存，临时浏览器和登录入口已关闭。"})
-        return web.json_response({"ok": False, "message": "尚未捕获到 Token。请在远程浏览器中进入“我的订单”，等待订单请求完成后再点击此按钮。"})
+            return web.json_response({"ok": True, "message": message})
+        self.last_event = "用户点击完成，但未捕获到 Token"
+        detail = self.last_error or "请求监听和网页存储均未发现 AccessToken。请确认已登录，并进入“我的订单”触发订单接口请求。"
+        message = "嘉立创登录凭证获取失败：\n" + detail
+        await self._notify("⚠️ " + message)
+        return web.json_response({"ok": False, "message": message, "detail": detail})
 
     async def _stop_server(self):
         await asyncio.sleep(1)
@@ -250,6 +312,9 @@ class JlcWebLogin:
             except OSError:
                 pass
         self.token = None
+        self.last_event = "已退出登录并清除本地会话"
+        self.last_error = ""
+        self.capture_count = 0
 
 
 PAGE = r"""<!doctype html>
