@@ -48,5 +48,11 @@
     "type": "bool",
     "default": false,
     "hint": "开启后即使没有待发货订单也会推送提示"
+  },
+  "admin_user_id": {
+    "description": "网页登录管理员 QQ 号",
+    "type": "string",
+    "default": "",
+    "hint": "仅该 QQ 号可以发起登录、查看认证状态和退出登录。建议填写自己的 QQ 号。"
   }
 }
