@@ -115,6 +115,9 @@ class JlcWebLogin:
                 app.router.add_get("/", self._index)
                 app.router.add_get("/screen", self._screen)
                 app.router.add_post("/click", self._click)
+                app.router.add_post("/move", self._move)
+                app.router.add_post("/down", self._down)
+                app.router.add_post("/up", self._up)
                 app.router.add_post("/type", self._type)
                 app.router.add_post("/key", self._key)
                 app.router.add_post("/scroll", self._scroll)
@@ -155,6 +158,24 @@ class JlcWebLogin:
         data = await self._payload(request)
         if self.page:
             await self.page.mouse.click(float(data["x"]), float(data["y"]))
+        return web.json_response({"ok": True})
+
+    async def _move(self, request):
+        data = await self._payload(request)
+        if self.page:
+            await self.page.mouse.move(float(data["x"]), float(data["y"]))
+        return web.json_response({"ok": True})
+
+    async def _down(self, request):
+        await self._payload(request)
+        if self.page:
+            await self.page.mouse.down()
+        return web.json_response({"ok": True})
+
+    async def _up(self, request):
+        await self._payload(request)
+        if self.page:
+            await self.page.mouse.up()
         return web.json_response({"ok": True})
 
     async def _type(self, request):
@@ -247,7 +268,12 @@ const q=new URLSearchParams(location.search),key=q.get('key'),img=document.query
 const api=(p,b={})=>fetch(p+'?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
 let busy=false;
 async function refresh(){if(busy)return;busy=true;try{const r=await fetch('/screen?key='+encodeURIComponent(key)+'&t='+Date.now());if(r.ok)img.src=URL.createObjectURL(await r.blob());else msg.textContent='浏览器会话已结束或链接失效。'}catch(e){}busy=false;}
-img.addEventListener('click',e=>{const r=img.getBoundingClientRect();api('/click',{x:(e.clientX-r.left)*img.naturalWidth/r.width,y:(e.clientY-r.top)*img.naturalHeight/r.height});setTimeout(refresh,500);});
+let dragging=false,moved=false;
+function pos(e){const r=img.getBoundingClientRect();return {x:(e.clientX-r.left)*img.naturalWidth/r.width,y:(e.clientY-r.top)*img.naturalHeight/r.height};}
+img.addEventListener('pointerdown',e=>{dragging=true;moved=false;img.setPointerCapture(e.pointerId);api('/move',pos(e)).then(()=>api('/down',{}));});
+img.addEventListener('pointermove',e=>{if(dragging){moved=true;api('/move',pos(e));}});
+img.addEventListener('pointerup',e=>{if(dragging){dragging=false;api('/up',{}).then(()=>setTimeout(refresh,500));}});
+img.addEventListener('click',e=>{if(moved){moved=false;return;}api('/click',pos(e)).then(()=>setTimeout(refresh,500));});
 document.querySelector('#send').onclick=async()=>{const el=document.querySelector('#text');await api('/type',{text:el.value});el.value='';setTimeout(refresh,500);};
 document.querySelector('#text').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.querySelector('#send').click();}});
 document.querySelectorAll('[data-key]').forEach(b=>b.onclick=()=>api('/key',{key:b.dataset.key}).then(()=>setTimeout(refresh,500)));
