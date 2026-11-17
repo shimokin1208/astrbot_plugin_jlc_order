@@ -1,7 +1,7 @@
 name: astrbot_plugin_jlc_order
 display_name: 嘉立创订单进度
 short_desc: 定时查询嘉立创 PCB/FPC 订单进度并推送到 QQ
-desc: 定时刷新嘉立创 PCB/FPC 订单进度并推送到 QQ，支持 Tailscale 网页登录自动获取 AccessToken。
+desc: 定时刷新嘉立创 PCB/FPC 订单进度并推送到 QQ，必须通过 Tailscale 网页登录获取 AccessToken，并提供登录失败诊断。
 version: v1.1.0
 author: shimokin1208
 repo: https://github.com/shimokin1208/astrbot_plugin_jlc_order
