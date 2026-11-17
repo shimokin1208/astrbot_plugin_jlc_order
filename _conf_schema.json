@@ -1,0 +1,52 @@
+{
+  "enabled": {
+    "description": "启用定时查询",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后插件不再自动轮询订单"
+  },
+  "access_token": {
+    "description": "嘉立创 AccessToken",
+    "type": "string",
+    "default": "",
+    "secret": true,
+    "hint": "请求头 x-jlc-accesstoken 的值。获取方法见 README",
+    "obvious_hint": true
+  },
+  "interval_minutes": {
+    "description": "轮询间隔（分钟）",
+    "type": "int",
+    "default": 40,
+    "hint": "建议 30~60 分钟，过短可能增加风控风险"
+  },
+  "notify_group_id": {
+    "description": "推送目标 QQ 群号",
+    "type": "string",
+    "default": "",
+    "hint": "填写群号即可，例如 123456789。留空则不推送到群"
+  },
+  "notify_user_id": {
+    "description": "推送目标 QQ 号（私聊备用）",
+    "type": "string",
+    "default": "",
+    "hint": "可选。群号为空时使用私聊推送"
+  },
+  "order_status": {
+    "description": "查询的订单状态",
+    "type": "string",
+    "default": "waitSend",
+    "hint": "常见值: waitSend(待发货)、all(全部)。一般保持默认即可"
+  },
+  "only_on_change": {
+    "description": "仅状态变化时推送",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后只有订单进度发生变化才发消息；关闭则每次轮询都推送"
+  },
+  "include_empty": {
+    "description": "无订单时也通知",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后即使没有待发货订单也会推送提示"
+  }
+}
