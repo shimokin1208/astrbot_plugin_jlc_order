@@ -5,14 +5,6 @@
     "default": true,
     "hint": "关闭后插件不再自动轮询订单"
   },
-  "access_token": {
-    "description": "嘉立创 AccessToken",
-    "type": "string",
-    "default": "",
-    "secret": true,
-    "hint": "请求头 x-jlc-accesstoken 的值。获取方法见 README",
-    "obvious_hint": true
-  },
   "interval_minutes": {
     "description": "轮询间隔（分钟）",
     "type": "int",
@@ -29,7 +21,7 @@
     "description": "推送目标 QQ 号（私聊备用）",
     "type": "string",
     "default": "",
-    "hint": "可选。群号为空时使用私聊推送"
+    "hint": "填写接收订单私聊推送的 QQ 号；网页登录管理员请单独填写 admin_user_id"
   },
   "order_status": {
     "description": "查询的订单状态",
@@ -48,5 +40,11 @@
     "type": "bool",
     "default": false,
     "hint": "开启后即使没有待发货订单也会推送提示"
+  },
+  "admin_user_id": {
+    "description": "网页登录管理员 QQ 号",
+    "type": "string",
+    "default": "",
+    "hint": "仅该 QQ 号可以发起登录、查看认证状态和退出登录。建议填写自己的 QQ 号。"
   }
 }
