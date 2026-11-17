@@ -362,7 +362,6 @@ class JlcOrderPlugin(Star):
             yield event.plain_result(f"无法启动网页登录：{e}")
 
     @filter.command("jlc登录状态")
-    @filter.command("jlc登录状态")
     async def cmd_login_status(self, event: AstrMessageEvent):
         if not self._login_admin(event):
             yield event.plain_result("无权查看登录状态。")
