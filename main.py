@@ -34,6 +34,7 @@ class JlcOrderPlugin(Star):
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._state_file = self._data_dir / "last_state.json"
         self._login = JlcWebLogin(self._data_dir)
+        self._login.notify_callback = self._notify_admin
         self._load_state()
 
     def _load_state(self):
@@ -76,7 +77,7 @@ class JlcOrderPlugin(Star):
         logger.info("[jlc_order] 定时查询任务已停止")
 
     def _get_access_token(self) -> str:
-        return self._login.get_saved_token() or (self.config.get("access_token") or "").strip()
+        return self._login.get_saved_token()
 
     def _get_headers(self) -> Dict[str, str]:
         token = self._get_access_token()
@@ -96,7 +97,7 @@ class JlcOrderPlugin(Star):
     async def _fetch_orders(self) -> List[Dict[str, Any]]:
         token = self._get_access_token()
         if not token:
-            raise ValueError("尚未登录嘉立创。请私聊机器人发送 /jlc登录，或在插件设置中填写备用 AccessToken。")
+            raise ValueError("未找到嘉立创网页登录凭证。请私聊机器人发送 /jlc登录，完成网页登录后再查询。")
 
         status = self.config.get("order_status") or "waitSend"
         params = {
@@ -306,11 +307,21 @@ class JlcOrderPlugin(Star):
             f"推送群: {group_id}\n"
             f"推送私聊: {user_id}\n"
             f"Token: {'已配置' if has_token else '未配置'}\n"
-            f"认证来源: {'网页登录' if self._login.get_saved_token() else ('手动配置' if (self.config.get('access_token') or '').strip() else '未登录')}\n"
+            f"认证来源: {'网页登录' if self._login.get_saved_token() else '未登录'}\n"
             f"仅变化推送: {'是' if self.config.get('only_on_change', True) else '否'}"
         )
         yield event.plain_result(text)
 
+
+    async def _notify_admin(self, message: str):
+        admin_id = str(self.config.get("admin_user_id") or "").strip()
+        if not admin_id:
+            logger.warning("[jlc_order] 未配置 admin_user_id，无法向管理员推送登录结果")
+            return
+        await self.context.send_message(
+            f"aiocqhttp:FriendMessage:{admin_id}",
+            MessageChain([Plain(message)]),
+        )
 
     def _login_admin(self, event: AstrMessageEvent) -> bool:
         admin_id = str(self.config.get("admin_user_id") or "").strip()
@@ -336,19 +347,12 @@ class JlcOrderPlugin(Star):
             yield event.plain_result(f"无法启动网页登录：{e}")
 
     @filter.command("jlc登录状态")
+    @filter.command("jlc登录状态")
     async def cmd_login_status(self, event: AstrMessageEvent):
         if not self._login_admin(event):
             yield event.plain_result("无权查看登录状态。")
             return
-        saved = bool(self._login.get_saved_token())
-        manual = bool((self.config.get("access_token") or "").strip())
-        browser = self._login.context is not None
-        yield event.plain_result(
-            "嘉立创认证状态\n"
-            f"网页登录凭证：{'已保存' if saved else '未保存'}\n"
-            f"手动备用 Token：{'已配置' if manual else '未配置'}\n"
-            f"临时浏览器：{'运行中' if browser else '已关闭'}"
-        )
+        yield event.plain_result("嘉立创网页登录状态\n" + self._login.status_text())
 
     @filter.command("jlc退出登录")
     async def cmd_logout(self, event: AstrMessageEvent):
@@ -356,4 +360,4 @@ class JlcOrderPlugin(Star):
             yield event.plain_result("无权执行退出登录。")
             return
         await self._login.logout()
-        yield event.plain_result("已清除插件保存的嘉立创网页登录凭证和浏览器会话。手动配置的备用 Token 不受影响。")
+        yield event.plain_result("已清除插件保存的嘉立创登录凭证和浏览器会话。")
