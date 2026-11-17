@@ -35,6 +35,7 @@ class JlcOrderPlugin(Star):
         self._state_file = self._data_dir / "last_state.json"
         self._login = JlcWebLogin(self._data_dir)
         self._login.notify_callback = self._notify_admin
+        self._last_error_notified = ""
         self._load_state()
 
     def _load_state(self):
@@ -114,12 +115,24 @@ class JlcOrderPlugin(Star):
                 params=params,
                 headers=self._get_headers(),
             )
+            if resp.status_code in (401, 403):
+                message = f"嘉立创订单接口认证失败（HTTP {resp.status_code}）。网页登录凭证可能已过期或无效，请发送 /jlc登录 重新登录。"
+                await self._notify_admin("⚠️ " + message)
+                raise RuntimeError(message)
             resp.raise_for_status()
-            data = resp.json()
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                raise RuntimeError(f"嘉立创接口返回的不是有效 JSON（HTTP {resp.status_code}），可能登录状态异常或接口已变更。") from exc
 
         if not data.get("success", False) and data.get("code") not in (0, 200, "0", "200"):
             msg = data.get("message") or data.get("msg") or str(data)
-            raise RuntimeError(f"接口返回失败: {msg}")
+            normalized = str(data.get("code", "")).lower()
+            if normalized in ("401", "403", "unauthorized", "token_expired", "no_login"):
+                message = f"嘉立创返回认证错误：{msg}。请发送 /jlc登录 重新登录。"
+                await self._notify_admin("⚠️ " + message)
+                raise RuntimeError(message)
+            raise RuntimeError(f"嘉立创接口返回失败: {msg}")
 
         # 兼容不同返回结构
         result = data.get("data") or data.get("result") or {}
@@ -261,16 +274,18 @@ class JlcOrderPlugin(Star):
             try:
                 if self.config.get("enabled", True):
                     await self._check_once(force=False)
+                    self._last_error_notified = ""
                 else:
                     logger.debug("[jlc_order] 定时查询已禁用")
             except Exception as e:
                 logger.error(f"[jlc_order] 轮询异常: {e}")
-                # Token 失效等错误也尝试通知一次
-                try:
-                    err_msg = f"⚠️ 嘉立创订单查询失败\n{e}"
-                    await self._send_to_target(err_msg)
-                except Exception:
-                    pass
+                err_text = str(e)
+                if err_text != self._last_error_notified:
+                    self._last_error_notified = err_text
+                    try:
+                        await self._notify_admin(f"⚠️ 嘉立创订单定时查询失败\n{err_text}")
+                    except Exception:
+                        pass
 
             interval = max(5, int(self.config.get("interval_minutes") or 40))
             try:
