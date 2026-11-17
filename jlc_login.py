@@ -332,9 +332,10 @@ small{color:#cbd5e1}.warn{color:#fbbf24}
 <div class="row"><input id="text" placeholder="在当前焦点输入框中输入文字"><button id="send">输入</button></div>
 <div class="row"><button data-key="Enter">回车</button><button data-key="Tab">Tab</button><button data-key="Escape">Esc</button><button data-key="Backspace">退格</button><button id="refresh">刷新画面</button></div>
 <div class="row"><button id="finish">完成登录并保存凭证</button></div>
-<p class="warn" id="msg">不要把此页面链接分享给他人。登录成功后点击“完成登录并保存凭证”。</p></main>
+<p class="warn" id="msg">不要把此页面链接分享给他人。登录成功后点击“完成登录并保存凭证”。</p>
+<pre id="diag" style="white-space:pre-wrap;background:#1f2937;padding:10px;border-radius:8px">正在检查登录状态…</pre></main>
 <script>
-const q=new URLSearchParams(location.search),key=q.get('key'),img=document.querySelector('#screen'),msg=document.querySelector('#msg');
+const q=new URLSearchParams(location.search),key=q.get('key'),img=document.querySelector('#screen'),msg=document.querySelector('#msg'),diag=document.querySelector('#diag');
 const api=(p,b={})=>fetch(p+'?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
 let busy=false;
 async function refresh(){if(busy)return;busy=true;try{const r=await fetch('/screen?key='+encodeURIComponent(key)+'&t='+Date.now());if(r.ok)img.src=URL.createObjectURL(await r.blob());else msg.textContent='浏览器会话已结束或链接失效。'}catch(e){}busy=false;}
@@ -350,6 +351,7 @@ document.querySelector('#text').addEventListener('keydown',e=>{if(e.key==='Enter
 document.querySelectorAll('[data-key]').forEach(b=>b.onclick=()=>api('/key',{key:b.dataset.key}).then(()=>setTimeout(refresh,500)));
 img.addEventListener('wheel',e=>{e.preventDefault();api('/scroll',{x:e.deltaX,y:e.deltaY}).then(()=>setTimeout(refresh,500));},{passive:false});
 document.querySelector('#refresh').onclick=refresh;
-document.querySelector('#finish').onclick=async()=>{const r=await api('/finish');const d=await r.json();msg.textContent=d.message;};
-refresh();setInterval(refresh,1200);
+document.querySelector('#finish').onclick=async()=>{try{const r=await api('/finish');const d=await r.json();msg.textContent=d.message;msg.style.color=d.ok?'#86efac':'#fca5a5';await status();}catch(e){msg.textContent='提交失败：'+e;msg.style.color='#fca5a5';}};
+async function status(){try{const r=await fetch('/status?key='+encodeURIComponent(key));if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json();diag.textContent='浏览器：'+(d.browser?'运行中':'已关闭')+'\nToken：'+(d.token?'已捕获':'未捕获')+'\n捕获次数：'+d.capture_count+'\n最近状态：'+d.event+'\n最近错误：'+(d.error||'无');}catch(e){diag.textContent='状态获取失败：'+e;}}
+refresh();status();setInterval(refresh,1200);setInterval(status,2000);
 </script></html>"""
