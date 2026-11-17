@@ -6,7 +6,7 @@
 
 ```bash
 cd /root/bot/data/plugins
-git clone -b feature/web-login https://github.com/shimokin1208/astrbot_plugin_jlc_order.git
+git clone https://github.com/shimokin1208/astrbot_plugin_jlc_order.git
 cd /root/bot
 uv pip install -r data/plugins/astrbot_plugin_jlc_order/requirements.txt
 uv run playwright install chromium
