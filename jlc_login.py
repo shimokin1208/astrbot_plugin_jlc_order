@@ -207,9 +207,11 @@ class JlcWebLogin:
             raise web.HTTPForbidden()
         await self._capture_token()
         found = bool(self.get_saved_token())
-        await self.close(keep_server=True)
-        asyncio.create_task(self._stop_server())
-        return web.json_response({"ok": found, "message": "凭证已保存" if found else "尚未捕获到 Token，请确认已完成登录并访问过订单页面。"})
+        if found:
+            await self.close(keep_server=True)
+            asyncio.create_task(self._stop_server())
+            return web.json_response({"ok": True, "message": "凭证已保存，临时浏览器和登录入口已关闭。"})
+        return web.json_response({"ok": False, "message": "尚未捕获到 Token。请在远程浏览器中进入“我的订单”，等待订单请求完成后再点击此按钮。"})
 
     async def _stop_server(self):
         await asyncio.sleep(1)
