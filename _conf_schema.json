@@ -6,11 +6,11 @@
     "hint": "关闭后插件不再自动轮询订单"
   },
   "access_token": {
-    "description": "嘉立创 AccessToken",
+    "description": "嘉立创 AccessToken（网页登录备用）",
     "type": "string",
     "default": "",
     "secret": true,
-    "hint": "请求头 x-jlc-accesstoken 的值。获取方法见 README",
+    "hint": "推荐使用 /jlc登录 通过 Tailscale 网页登录自动获取；此项保留为手动备用 Token",
     "obvious_hint": true
   },
   "interval_minutes": {
@@ -29,7 +29,7 @@
     "description": "推送目标 QQ 号（私聊备用）",
     "type": "string",
     "default": "",
-    "hint": "可选。群号为空时使用私聊推送"
+    "hint": "填写自己的 QQ 号，用于私聊推送，同时作为网页登录功能的唯一管理员账号（必填）"
   },
   "order_status": {
     "description": "查询的订单状态",
