@@ -48,6 +48,7 @@ class JlcWebLogin:
 
     def _save_token(self, token: str):
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.data_dir, 0o700)
         temp = self.token_file.with_suffix(".tmp")
         temp.write_text(
             json.dumps({"access_token": token}, ensure_ascii=False),
@@ -107,6 +108,8 @@ class JlcWebLogin:
                     locale="zh-CN",
                     args=["--no-sandbox", "--disable-dev-shm-usage"],
                 )
+                if self.profile_dir.exists():
+                    os.chmod(self.profile_dir, 0o700)
                 self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
                 self.page.on("request", self._on_request)
                 await self.page.goto("https://m.jlc.com/", wait_until="domcontentloaded", timeout=60000)
@@ -270,10 +273,11 @@ let busy=false;
 async function refresh(){if(busy)return;busy=true;try{const r=await fetch('/screen?key='+encodeURIComponent(key)+'&t='+Date.now());if(r.ok)img.src=URL.createObjectURL(await r.blob());else msg.textContent='浏览器会话已结束或链接失效。'}catch(e){}busy=false;}
 let dragging=false,moved=false;
 function pos(e){const r=img.getBoundingClientRect();return {x:(e.clientX-r.left)*img.naturalWidth/r.width,y:(e.clientY-r.top)*img.naturalHeight/r.height};}
-img.addEventListener('pointerdown',e=>{dragging=true;moved=false;img.setPointerCapture(e.pointerId);api('/move',pos(e)).then(()=>api('/down',{}));});
-img.addEventListener('pointermove',e=>{if(dragging){moved=true;api('/move',pos(e));}});
-img.addEventListener('pointerup',e=>{if(dragging){dragging=false;api('/up',{}).then(()=>setTimeout(refresh,500));}});
-img.addEventListener('click',e=>{if(moved){moved=false;return;}api('/click',pos(e)).then(()=>setTimeout(refresh,500));});
+let mouseQueue=Promise.resolve();
+function enqueue(path,data){mouseQueue=mouseQueue.then(()=>api(path,data));return mouseQueue;}
+img.addEventListener('pointerdown',e=>{dragging=true;moved=false;img.setPointerCapture(e.pointerId);enqueue('/move',pos(e)).then(()=>enqueue('/down',{}));});
+img.addEventListener('pointermove',e=>{if(dragging){moved=true;enqueue('/move',pos(e));}});
+img.addEventListener('pointerup',e=>{if(dragging){dragging=false;enqueue('/up',{}).then(()=>setTimeout(refresh,500));}});
 document.querySelector('#send').onclick=async()=>{const el=document.querySelector('#text');await api('/type',{text:el.value});el.value='';setTimeout(refresh,500);};
 document.querySelector('#text').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.querySelector('#send').click();}});
 document.querySelectorAll('[data-key]').forEach(b=>b.onclick=()=>api('/key',{key:b.dataset.key}).then(()=>setTimeout(refresh,500)));
