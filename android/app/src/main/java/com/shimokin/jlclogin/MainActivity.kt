@@ -2,6 +2,8 @@ package com.shimokin.jlclogin
 
 import android.app.Activity
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.graphics.Color
 import android.net.Uri
 import android.view.ViewGroup
@@ -22,6 +24,15 @@ class MainActivity : Activity() {
     private var server = ""
     private var pairKey = ""
     private val sent = AtomicBoolean(false)
+    private val handler = Handler(Looper.getMainLooper())
+    private val storagePoll = object : Runnable {
+        override fun run() {
+            if (server.isNotEmpty() && web.url?.startsWith("https://m.jlc.com") == true && !sent.get()) {
+                pollPageStorage()
+                handler.postDelayed(this, 1500)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,7 +80,10 @@ class MainActivity : Activity() {
                 }
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    if (url?.startsWith("https://m.jlc.com") == true) pollPageStorage()
+                    if (url?.startsWith("https://m.jlc.com") == true && server.isNotEmpty()) {
+                        handler.removeCallbacks(storagePoll)
+                        handler.post(storagePoll)
+                    }
                 }
             }
         }
@@ -146,6 +160,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(storagePoll)
         web.destroy()
         super.onDestroy()
     }
