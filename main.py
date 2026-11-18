@@ -53,7 +53,7 @@ class JlcOrderPlugin(Star):
             except OSError:
                 pass
         self._state_file = self._data_dir / "last_state.json"
-        self._login = JlcWebLogin(self._data_dir)
+        self._login = JlcWebLogin(self._data_dir, self.config.get("windows_cdp_url", ""))
         self._login.notify_callback = self._notify_admin
         self._last_error_notified = ""
         self._load_state()
@@ -423,54 +423,17 @@ class JlcOrderPlugin(Star):
 
     @filter.command("jlc登录")
     async def cmd_login(self, event: AstrMessageEvent):
-        """启动网页登录；私聊时直接在当前会话返回链接，群聊时私聊管理员。"""
+        """连接 Windows 浏览器并监听嘉立创登录请求。"""
         if not self._login_admin(event):
             yield event.plain_result("无权发起登录。请先在插件配置中填写自己的 QQ 号（admin_user_id），并使用该账号操作。")
             return
         self._remember_platform(event)
         try:
-            url = await self._login.start()
-            admin_id = str(self.config.get("admin_user_id") or "").strip()
-            group_id = str(event.get_group_id() or "").strip()
-
-            # 管理员在私聊中发起命令时，当前会话本身就是管理员私聊。
-            # 直接把链接作为命令回复返回，避免主动私聊发送成功但用户看不到消息的情况。
-            if not group_id:
-                yield event.plain_result(
-                    "嘉立创临时网页登录入口（仅本人使用，勿转发）：\n"
-                    + url
-                    + "\n\n请保持手机/电脑已连接 Tailscale，再打开上面的地址。"
-                )
-                return
-
-            # 群聊中不回显密钥链接，改为向管理员私聊发送。
-            platform_id = str(event.get_platform_id() or "").strip()
-            if not platform_id:
-                yield event.plain_result("网页登录已启动，但无法获取当前平台实例 ID，未发送私聊链接。请查看 AstrBot 日志。")
-                return
-            umo = f"{platform_id}:FriendMessage:{admin_id}"
-            sent = await self.context.send_message(
-                umo,
-                MessageChain([Plain(
-                    "嘉立创临时网页登录入口（仅本人使用，勿转发）：\n"
-                    + url
-                    + "\n\n请保持手机/电脑已连接 Tailscale，再打开上面的地址。"
-                )]),
-            )
-            if not sent:
-                logger.error(
-                    f"[jlc_order] 登录链接发送失败 ({umo})："
-                    f"send_message 返回 {sent!r}"
-                )
-                yield event.plain_result(
-                    "网页登录已启动，但私聊链接发送失败（AstrBot 未找到可用平台实例）。"
-                    "请改为私聊机器人发送 /jlc登录，链接会直接回复在当前私聊中。"
-                )
-                return
-            yield event.plain_result("网页登录已启动，临时入口已提交给管理员私聊。若没有收到，请直接私聊机器人发送 /jlc登录，链接会显示在当前会话。")
+            message = await self._login.start()
+            yield event.plain_result(message + "\\n\\n请在 Windows 浏览器中完成嘉立创登录，并进入“我的订单”触发接口请求。\\n完成后发送 /jlc登录状态 检查凭证是否已保存。")
         except Exception as e:
-            logger.exception("[jlc_order] 启动网页登录失败")
-            yield event.plain_result(f"无法启动网页登录：{e}")
+            logger.exception("[jlc_order] 连接 Windows 浏览器失败")
+            yield event.plain_result(f"无法连接 Windows 浏览器：{e}")
 
     @filter.command("jlc登录状态")
     async def cmd_login_status(self, event: AstrMessageEvent):
