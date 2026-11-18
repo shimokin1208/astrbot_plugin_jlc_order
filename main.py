@@ -430,7 +430,7 @@ class JlcOrderPlugin(Star):
         self._remember_platform(event)
         try:
             message = await self._login.start()
-            yield event.plain_result(message + "\\n\\n请在 Windows 浏览器中完成嘉立创登录，并进入“我的订单”触发接口请求。\\n完成后发送 /jlc登录状态 检查凭证是否已保存。")
+            yield event.plain_result(message + "\n\n请在 Windows 浏览器中完成嘉立创登录，并进入“我的订单”触发接口请求。\n完成后发送 /jlc登录状态 检查凭证是否已保存。")
         except Exception as e:
             logger.exception("[jlc_order] 连接 Windows 浏览器失败")
             yield event.plain_result(f"无法连接 Windows 浏览器：{e}")
@@ -450,4 +450,4 @@ class JlcOrderPlugin(Star):
             return
         self._remember_platform(event)
         await self._login.logout()
-        yield event.plain_result("已清除插件保存的嘉立创登录凭证和浏览器会话。")
+        yield event.plain_result("已清除插件保存的嘉立创登录凭证；Windows 浏览器不会被关闭。")
