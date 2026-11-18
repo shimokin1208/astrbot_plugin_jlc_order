@@ -28,6 +28,7 @@ class JlcMobileLogin:
         self.last_error = ""
         self._used = False
         self._lock = asyncio.Lock()
+        self._expiry_task = None
 
     @staticmethod
     def _tailscale_ip() -> str:
@@ -92,16 +93,17 @@ class JlcMobileLogin:
         except Exception:
             await self.close()
             raise
+        self._expiry_task = asyncio.create_task(self._expire())
         from urllib.parse import quote
         endpoint = f"http://{self.host}:{self.port}"
-        return f"http://{self.host}:{self.port}/open?key={quote(self.key, safe=chr(0))}".replace(chr(0), "")
+        return f"http://{self.host}:{self.port}/open?key={quote(self.key, safe='')}"
 
     async def _open_page(self, request):
         if not self._authorized(request):
             raise web.HTTPForbidden(text="配对链接已失效，请重新发送 /jlc登录")
         from urllib.parse import quote
         endpoint = f"http://{self.host}:{self.port}"
-        deep_link = f"jlcorder://login?server={quote(endpoint, safe=chr(0))}&key={quote(self.key, safe=chr(0))}".replace(chr(0), "")
+        deep_link = f"jlcorder://login?server={quote(endpoint, safe='')}&key={quote(self.key, safe='')}"
         html = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         <title>打开嘉立创登录助手</title><style>body{font:16px system-ui;padding:28px;line-height:1.7}a{display:block;padding:14px;background:#1677ff;color:white;text-decoration:none;border-radius:8px;text-align:center}</style>
         <h3>嘉立创手机登录</h3><p>请确认已安装嘉立创登录助手 APK，并且手机已连接 Tailscale。</p>
@@ -128,7 +130,11 @@ class JlcMobileLogin:
             token = token.removeprefix("Bearer ").strip()
             if len(token) < 8 or len(token) > 8192 or any(ord(c) < 33 or ord(c) > 126 for c in token):
                 raise web.HTTPBadRequest(text="Token format rejected")
-            self._save_token(token)
+            try:
+                self._save_token(token)
+            except OSError as exc:
+                self.last_error = f"Token 保存失败：{type(exc).__name__}"
+                raise web.HTTPInternalServerError(text="Token 保存失败，请检查插件数据目录权限") from exc
             self._used = True
             self.last_event = "安卓手机已成功回传 AccessToken"
             self.last_error = ""
@@ -136,7 +142,16 @@ class JlcMobileLogin:
             asyncio.create_task(self._stop_server())
             return web.json_response({"ok": True, "message": "登录凭证已保存"})
 
+    async def _expire(self):
+        await asyncio.sleep(max(0, self.expires_at - time.time()))
+        if self.runner and not self._used:
+            self.last_event = "手机登录配对已过期，请重新发送 /jlc登录"
+            await self.close()
+
     async def _stop_server(self):
+        if self._expiry_task and self._expiry_task is not asyncio.current_task():
+            self._expiry_task.cancel()
+            self._expiry_task = None
         runner = self.runner
         await asyncio.sleep(1)
         if runner and self.runner is runner:
@@ -145,6 +160,9 @@ class JlcMobileLogin:
             self.key = ""
 
     async def close(self):
+        if self._expiry_task and self._expiry_task is not asyncio.current_task():
+            self._expiry_task.cancel()
+            self._expiry_task = None
         if self.runner:
             try:
                 await self.runner.cleanup()
