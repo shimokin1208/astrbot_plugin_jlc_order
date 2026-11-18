@@ -1,7 +1,7 @@
 param([Parameter(Mandatory=$true)][string]$MiniPcTailscaleIp)
 $ErrorActionPreference = "Stop"
-if (-not (Get-Command tailscale.exe -ErrorAction SilentlyContinue)) { throw "未找到 Tailscale，请先安装并登录。" }
-$windowsTsIp = (& tailscale.exe ip -4 | Select-Object -First 1).Trim()
+if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) { throw "未找到 Tailscale，请先安装并登录。" }
+$windowsTsIp = (& tailscale ip -4 | Select-Object -First 1).Trim()
 if (-not $windowsTsIp) { throw "无法获取本机 Tailscale IPv4 地址。" }
 $chrome = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe","$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe","$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 $edge = @("$env:ProgramFiles(x86)\Microsoft\Edge\Application\msedge.exe","$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
@@ -12,8 +12,8 @@ Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue | Remove-Ne
 New-NetFirewallRule -DisplayName $rule -Direction Inbound -Action Allow -Protocol TCP -LocalPort 9222 -LocalAddress $windowsTsIp -RemoteAddress $MiniPcTailscaleIp -Profile Any | Out-Null
 $profile = Join-Path $env:LOCALAPPDATA "JLC-Login-Browser"
 New-Item -ItemType Directory -Force -Path $profile | Out-Null
-$args = @("--remote-debugging-port=9222","--remote-debugging-address=$windowsTsIp","--remote-allow-origins=*","--user-data-dir=$profile","--no-first-run","--no-default-browser-check","https://www.jlc.com/")
-Start-Process -FilePath $browser -ArgumentList $args
+$browserArgs = "--remote-debugging-port=9222 --remote-debugging-address=$windowsTsIp --remote-allow-origins=* --user-data-dir=`"$profile`" --no-first-run --no-default-browser-check https://www.jlc.com/"
+Start-Process -FilePath $browser -ArgumentList $browserArgs
 Write-Host "嘉立创专用浏览器已启动。" -ForegroundColor Green
 Write-Host "Windows Tailscale IP: $windowsTsIp"
 Write-Host "调试地址: http://$windowsTsIp:9222"
