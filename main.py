@@ -22,7 +22,7 @@ ORDER_LIST_URL = "https://m.jlc.com/api/overseas-pcb-order/order/getOrderPageLis
     "astrbot_plugin_jlc_order",
     "shimokin1208",
     "定时查询嘉立创 PCB/FPC 订单进度并推送到 QQ",
-    "1.1.0",
+    "1.3.0",
 )
 class JlcOrderPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -383,7 +383,7 @@ class JlcOrderPlugin(Star):
             f"推送群: {group_id}\n"
             f"推送私聊: {user_id}\n"
             f"Token: {'已配置' if has_token else '未配置'}\n"
-            f"认证来源: {'网页登录' if self._login.get_saved_token() else '未登录'}\n"
+            f"认证来源: {'安卓手机登录' if self._login.get_saved_token() else '未登录'}\n"
             f"仅变化推送: {'是' if self.config.get('only_on_change', True) else '否'}"
         )
         yield event.plain_result(text)
@@ -450,8 +450,8 @@ class JlcOrderPlugin(Star):
                 return
             yield event.plain_result("安卓登录配对链接已私聊发送给管理员。请在手机安装 APK 并点击链接。")
         except Exception as e:
-            logger.exception("[jlc_order] 启动网页登录失败")
-            yield event.plain_result(f"无法启动网页登录：{e}")
+            logger.exception("[jlc_order] 启动安卓登录配对失败")
+            yield event.plain_result(f"无法启动安卓登录配对：{e}")
 
     @filter.command("jlc登录状态")
     async def cmd_login_status(self, event: AstrMessageEvent):
@@ -468,4 +468,4 @@ class JlcOrderPlugin(Star):
             return
         self._remember_platform(event)
         await self._login.logout()
-        yield event.plain_result("已清除插件保存的嘉立创登录凭证和浏览器会话。")
+        yield event.plain_result("已清除插件保存的嘉立创 AccessToken。")
