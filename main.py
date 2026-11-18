@@ -423,22 +423,39 @@ class JlcOrderPlugin(Star):
 
     @filter.command("jlc登录")
     async def cmd_login(self, event: AstrMessageEvent):
-        """向配置的管理员私聊发送一次性网页登录入口"""
+        """启动网页登录；私聊时直接在当前会话返回链接，群聊时私聊管理员。"""
         if not self._login_admin(event):
             yield event.plain_result("无权发起登录。请先在插件配置中填写自己的 QQ 号（admin_user_id），并使用该账号操作。")
             return
         self._remember_platform(event)
         try:
             url = await self._login.start()
-            admin_id = str(self.config.get("admin_user_id")).strip()
+            admin_id = str(self.config.get("admin_user_id") or "").strip()
+            group_id = str(event.get_group_id() or "").strip()
+
+            # 管理员在私聊中发起命令时，当前会话本身就是管理员私聊。
+            # 直接把链接作为命令回复返回，避免主动私聊发送成功但用户看不到消息的情况。
+            if not group_id:
+                yield event.plain_result(
+                    "嘉立创临时网页登录入口（仅本人使用，勿转发）：\n"
+                    + url
+                    + "\n\n请保持手机/电脑已连接 Tailscale，再打开上面的地址。"
+                )
+                return
+
+            # 群聊中不回显密钥链接，改为向管理员私聊发送。
             platform_id = str(event.get_platform_id() or "").strip()
             if not platform_id:
-                yield event.plain_result("网页登录入口已启动，但无法获取当前平台实例 ID，未发送私聊链接。请查看 AstrBot 日志。")
+                yield event.plain_result("网页登录已启动，但无法获取当前平台实例 ID，未发送私聊链接。请查看 AstrBot 日志。")
                 return
             umo = f"{platform_id}:FriendMessage:{admin_id}"
             sent = await self.context.send_message(
                 umo,
-                MessageChain([Plain("嘉立创临时登录入口（仅本人使用，勿转发）：\n" + url)]),
+                MessageChain([Plain(
+                    "嘉立创临时网页登录入口（仅本人使用，勿转发）：\n"
+                    + url
+                    + "\n\n请保持手机/电脑已连接 Tailscale，再打开上面的地址。"
+                )]),
             )
             if not sent:
                 logger.error(
@@ -446,11 +463,11 @@ class JlcOrderPlugin(Star):
                     f"send_message 返回 {sent!r}"
                 )
                 yield event.plain_result(
-                    "网页登录已启动，但私聊链接发送失败（平台未接受消息）。"
-                    "请确认机器人已能主动私聊该 QQ，并检查 AstrBot 日志。"
+                    "网页登录已启动，但私聊链接发送失败（AstrBot 未找到可用平台实例）。"
+                    "请改为私聊机器人发送 /jlc登录，链接会直接回复在当前私聊中。"
                 )
                 return
-            yield event.plain_result("已将临时网页登录入口私聊发送给你。请通过 Tailscale 打开链接，完成登录后点击页面底部的“完成登录并保存凭证”。")
+            yield event.plain_result("网页登录已启动，临时入口已提交给管理员私聊。若没有收到，请直接私聊机器人发送 /jlc登录，链接会显示在当前会话。")
         except Exception as e:
             logger.exception("[jlc_order] 启动网页登录失败")
             yield event.plain_result(f"无法启动网页登录：{e}")
