@@ -46,11 +46,5 @@
     "type": "string",
     "default": "",
     "hint": "仅该 QQ 号可以发起登录、查看认证状态和退出登录。建议填写自己的 QQ 号。"
-  },
-  "windows_cdp_url": {
-    "description": "Windows 浏览器 Tailscale 调试地址",
-    "type": "string",
-    "default": "",
-    "hint": "填写 http://Windows的Tailscale_IP:9222；仅允许小主机通过 Tailscale 访问"
   }
 }

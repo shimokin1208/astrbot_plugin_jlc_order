@@ -1,49 +1,61 @@
 # 嘉立创订单进度（AstrBot 插件）
 
-登录采用 Windows 本机浏览器 + Tailscale CDP：网页在 Windows Chrome/Edge 中运行，小主机只监听请求并保存 AccessToken，不再运行远程浏览器画面。
+定时查询嘉立创 PCB/FPC 订单状态，并向指定 QQ 群或私聊推送。认证方式为 **Tailscale 网页登录**，不提供手动 Token 配置。
 
-## Windows 浏览器准备
+## 安装依赖
 
-Windows 和 Debian 小主机登录同一个 Tailscale 网络。在 Windows PowerShell 运行仓库的 start_jlc_login.ps1：
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\start_jlc_login.ps1 -MiniPcTailscaleIp "小主机的Tailscale_IP"
+```bash
+cd /root/bot/data/plugins
+git clone https://github.com/shimokin1208/astrbot_plugin_jlc_order.git
+cd /root/bot
+uv pip install -r data/plugins/astrbot_plugin_jlc_order/requirements.txt
+uv run playwright install chromium
 ```
 
-脚本启动 Chrome/Edge 专用配置，将调试端口绑定到 Windows Tailscale 地址，并限制防火墙仅允许指定的小主机 Tailscale IP 访问 9222。
+如果 Chromium 缺少系统库：
 
-Windows 执行 tailscale ip -4，记下 Windows Tailscale IPv4 地址。在 AstrBot 插件配置 windows_cdp_url 中填写：
-
-```
-http://Windows的Tailscale_IP:9222
+```bash
+uv run playwright install-deps chromium
 ```
 
-## 登录步骤
+## 配置
 
-1. 确认 Windows 浏览器已由脚本启动，且两台设备的 Tailscale 均在线。
-2. QQ 私聊机器人发送 /jlc登录。
-3. 插件连接 Windows 浏览器并监听登录请求。
-4. 在 Windows 浏览器中登录嘉立创，进入“我的订单”触发订单 API 请求。
-5. QQ 私聊发送 /jlc登录状态，确认 Token 显示“已保存”。
-6. 登录成功后可关闭 Windows 浏览器；订单查询由小主机使用已保存的 Token 完成。
+- `admin_user_id`：自己的 QQ 号，唯一网页登录管理员。
+- `notify_group_id`：订单推送群号（可选）。
+- `notify_user_id`：订单推送私聊 QQ 号（可选）。
+- `interval_minutes`：轮询间隔，默认 40 分钟。
 
-## 依赖
+不再支持手动填写 AccessToken。插件只使用网页登录捕获并保存的凭证。
 
-在 AstrBot 环境执行：`cd /root/bot && uv pip install -r data/plugins/astrbot_plugin_jlc_order/requirements.txt`。插件端不再需要安装 Chromium。
+## 网页登录
+
+1. Debian 小主机和电脑都连接同一个 Tailscale 网络。
+2. 私聊机器人发送 `/jlc登录`。
+3. 机器人会把临时登录地址私聊给管理员。
+4. 在电脑浏览器打开地址，使用账号和密码登录嘉立创；遇到滑块验证时手动完成。
+5. 登录后进入“我的订单”，确保订单列表接口请求已经发生。
+6. 点击“完成登录并保存凭证”。
+7. 页面会显示实时诊断：Token 是否捕获、捕获次数、最近事件和错误信息。
+8. 成功或失败都会向管理员 QQ 发送消息。
 
 ## 指令
 
 | 指令 | 作用 |
 |---|---|
-| /jlc登录 | 连接 Windows 浏览器并监听登录请求 |
-| /jlc登录状态 | 查看浏览器连接和 Token 状态 |
-| /jlc退出登录 | 清除本地凭证，不会关闭 Windows 浏览器 |
-| /jlc订单 | 立即查询订单 |
-| /jlc状态 | 查看轮询任务 |
+| `/jlc登录` | 启动临时远程浏览器 |
+| `/jlc登录状态` | 查看浏览器、Token 捕获和错误状态 |
+| `/jlc退出登录` | 清除本地凭证及浏览器会话 |
+| `/jlc订单` | 立即查询订单 |
+| `/jlc状态` | 查看轮询任务 |
+
+## 失败提示
+
+登录入口启动失败、浏览器启动失败、没有捕获到 Token 等情况会在 QQ 中给出错误提示。登录页面也会显示捕获状态与最近错误。订单接口返回未授权或认证失败时会提示重新登录。
 
 ## 安全说明
 
-DevTools 接口拥有浏览器完整控制权限。脚本将端口绑定到 Windows Tailscale 地址，并创建仅允许指定小主机 Tailscale IP 访问的防火墙规则。不要将 9222 端口开放到公网。Token 保存在插件数据目录的 auth.json 中，目录权限为 700、文件权限为 600。
+登录入口绑定小主机 Tailscale IPv4 地址，使用随机一次性密钥；不要转发链接，也不要把端口 18763 暴露到公网。Token 保存在插件数据目录的受限权限文件中。退出登录会删除 Token 和持久化浏览器会话。
 
-嘉立创可能调整 Token 传递方式；真实账号登录后仍需验证请求是否包含 x-jlc-accesstoken。
+## 注意
+
+嘉立创可能调整网页结构、登录验证或 Token 传递方式。当前版本需要真实账号验证；验证码、风控或认证流程变化可能导致登录失败。Token 过期后需要重新执行网页登录。
