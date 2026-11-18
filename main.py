@@ -44,7 +44,10 @@ class JlcOrderPlugin(Star):
             for item in legacy_dir.iterdir():
                 target = self._data_dir / item.name
                 if not target.exists():
-                    shutil.move(str(item), str(target))
+                    try:
+                        shutil.move(str(item), str(target))
+                    except OSError as e:
+                        logger.warning(f"[jlc_order] 迁移旧数据失败 ({item}): {e}")
             try:
                 legacy_dir.rmdir()
             except OSError:
@@ -80,6 +83,8 @@ class JlcOrderPlugin(Star):
 
     def _remember_platform(self, event: AstrMessageEvent):
         """记住管理员当前使用的平台实例 ID，供后台通知复用。"""
+        if not self._login_admin(event):
+            return
         try:
             platform_id = str(event.get_platform_id() or "").strip()
         except Exception:
@@ -311,8 +316,11 @@ class JlcOrderPlugin(Star):
                 should_notify = True
 
         if should_notify:
-            await self._send_to_target(text)
-            self._save_state(snap)
+            sent = await self._send_to_target(text)
+            if sent:
+                self._save_state(snap)
+            else:
+                logger.warning("[jlc_order] 订单通知未送达，保留旧快照以便下次轮询重试")
         else:
             logger.info("[jlc_order] 订单无变化，跳过推送")
 
