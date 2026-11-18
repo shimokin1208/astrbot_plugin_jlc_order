@@ -1,13 +1,14 @@
 import asyncio
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.api.message_components import Plain
 
@@ -30,8 +31,27 @@ class JlcOrderPlugin(Star):
         self._task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
         self._last_snapshot_hash: Optional[str] = None
-        self._data_dir = Path("data") / "plugins_data" / "astrbot_plugin_jlc_order"
+        self._admin_platform_id: Optional[str] = None
+        # 使用 AstrBot 提供的绝对插件数据目录，并兼容迁移旧版相对路径数据。
+        legacy_dir = (
+            Path(__file__).resolve().parents[2]
+            / "plugins_data"
+            / "astrbot_plugin_jlc_order"
+        )
+        self._data_dir = StarTools.get_data_dir("astrbot_plugin_jlc_order")
         self._data_dir.mkdir(parents=True, exist_ok=True)
+        if legacy_dir.exists() and legacy_dir.resolve() != self._data_dir.resolve():
+            for item in legacy_dir.iterdir():
+                target = self._data_dir / item.name
+                if not target.exists():
+                    try:
+                        shutil.move(str(item), str(target))
+                    except OSError as e:
+                        logger.warning(f"[jlc_order] 迁移旧数据失败 ({item}): {e}")
+            try:
+                legacy_dir.rmdir()
+            except OSError:
+                pass
         self._state_file = self._data_dir / "last_state.json"
         self._login = JlcWebLogin(self._data_dir)
         self._login.notify_callback = self._notify_admin
@@ -41,20 +61,51 @@ class JlcOrderPlugin(Star):
     def _load_state(self):
         if self._state_file.exists():
             try:
-                data = json.loads(self._state_file.read_text(encoding="utf-8"))
+                data = json.loads(self._state_file.read_text(encoding="utf-8-sig"))
                 self._last_snapshot_hash = data.get("hash")
+                self._admin_platform_id = str(data.get("platform_id") or "").strip() or None
             except Exception as e:
                 logger.warning(f"[jlc_order] 读取状态文件失败: {e}")
 
     def _save_state(self, snapshot_hash: str):
         try:
             self._state_file.write_text(
-                json.dumps({"hash": snapshot_hash}, ensure_ascii=False, indent=2),
+                json.dumps(
+                    {"hash": snapshot_hash, "platform_id": self._admin_platform_id},
+                    ensure_ascii=False,
+                    indent=2,
+                ),
                 encoding="utf-8",
             )
             self._last_snapshot_hash = snapshot_hash
         except Exception as e:
             logger.warning(f"[jlc_order] 保存状态文件失败: {e}")
+
+    def _remember_platform(self, event: AstrMessageEvent):
+        """记住管理员当前使用的平台实例 ID，供后台通知复用。"""
+        if not self._login_admin(event):
+            return
+        try:
+            platform_id = str(event.get_platform_id() or "").strip()
+        except Exception:
+            platform_id = ""
+        if platform_id:
+            self._admin_platform_id = platform_id
+            try:
+                self._state_file.parent.mkdir(parents=True, exist_ok=True)
+                self._state_file.write_text(
+                    json.dumps(
+                        {
+                            "hash": self._last_snapshot_hash,
+                            "platform_id": self._admin_platform_id,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+            except Exception as e:
+                logger.warning(f"[jlc_order] 保存平台实例信息失败: {e}")
 
     async def initialize(self):
         """插件加载后启动后台轮询任务"""
@@ -224,22 +275,27 @@ class JlcOrderPlugin(Star):
 
         if not group_id and not user_id:
             logger.warning("[jlc_order] 未配置推送目标群号或 QQ 号，跳过发送")
-            return
+            return False
+        if not self._admin_platform_id:
+            logger.error("[jlc_order] 未知平台实例 ID，无法发送订单通知；请先从目标平台发送一次插件指令")
+            return False
 
-        # 优先群，其次私聊
-        # AstrBot 主动消息使用 unified_msg_origin
-        # 群: aiocqhttp:GroupMessage:群号
-        # 私聊: aiocqhttp:FriendMessage:QQ号
+        # 平台实例 ID 可能是 default 等自定义值，不能写死适配器类型名。
         if group_id:
-            umo = f"aiocqhttp:GroupMessage:{group_id}"
+            umo = f"{self._admin_platform_id}:GroupMessage:{group_id}"
         else:
-            umo = f"aiocqhttp:FriendMessage:{user_id}"
+            umo = f"{self._admin_platform_id}:FriendMessage:{user_id}"
 
         try:
-            await self.context.send_message(umo, MessageChain([Plain(text)]))
+            sent = await self.context.send_message(umo, MessageChain([Plain(text)]))
+            if not sent:
+                logger.error(f"[jlc_order] 平台未接受订单推送 ({umo})，send_message 返回 {sent!r}")
+                return False
             logger.info(f"[jlc_order] 已推送到 {umo}")
+            return True
         except Exception as e:
             logger.error(f"[jlc_order] 推送失败 ({umo}): {e}")
+            return False
 
     async def _check_once(self, force: bool = False) -> str:
         """执行一次查询，返回可读文本"""
@@ -260,8 +316,11 @@ class JlcOrderPlugin(Star):
                 should_notify = True
 
         if should_notify:
-            await self._send_to_target(text)
-            self._save_state(snap)
+            sent = await self._send_to_target(text)
+            if sent:
+                self._save_state(snap)
+            else:
+                logger.warning("[jlc_order] 订单通知未送达，保留旧快照以便下次轮询重试")
         else:
             logger.info("[jlc_order] 订单无变化，跳过推送")
 
@@ -297,6 +356,7 @@ class JlcOrderPlugin(Star):
     @filter.command("jlc订单", alias={"jlcorder", "嘉立创订单"})
     async def cmd_query(self, event: AstrMessageEvent):
         """立即查询一次嘉立创订单进度"""
+        self._remember_platform(event)
         try:
             text = await self._check_once(force=True)
             yield event.plain_result(text)
@@ -307,6 +367,7 @@ class JlcOrderPlugin(Star):
     @filter.command("jlc状态")
     async def cmd_status(self, event: AstrMessageEvent):
         """查看插件运行状态"""
+        self._remember_platform(event)
         enabled = self.config.get("enabled", True)
         interval = self.config.get("interval_minutes", 40)
         group_id = self.config.get("notify_group_id") or "（未设置）"
@@ -332,11 +393,28 @@ class JlcOrderPlugin(Star):
         admin_id = str(self.config.get("admin_user_id") or "").strip()
         if not admin_id:
             logger.warning("[jlc_order] 未配置 admin_user_id，无法向管理员推送登录结果")
-            return
-        await self.context.send_message(
-            f"aiocqhttp:FriendMessage:{admin_id}",
-            MessageChain([Plain(message)]),
-        )
+            return False
+        if not self._admin_platform_id:
+            logger.error("[jlc_order] 未记录管理员的平台实例 ID，无法发送登录通知")
+            return False
+
+        umo = f"{self._admin_platform_id}:FriendMessage:{admin_id}"
+        try:
+            sent = await self.context.send_message(
+                umo,
+                MessageChain([Plain(message)]),
+            )
+            if not sent:
+                logger.error(
+                    f"[jlc_order] 管理员通知发送失败 ({umo})："
+                    f"send_message 返回 {sent!r}"
+                )
+                return False
+            logger.info(f"[jlc_order] 管理员通知已发送到 {umo}")
+            return True
+        except Exception as e:
+            logger.error(f"[jlc_order] 管理员通知发送异常 ({umo}): {e}")
+            return False
 
     def _login_admin(self, event: AstrMessageEvent) -> bool:
         admin_id = str(self.config.get("admin_user_id") or "").strip()
@@ -349,13 +427,29 @@ class JlcOrderPlugin(Star):
         if not self._login_admin(event):
             yield event.plain_result("无权发起登录。请先在插件配置中填写自己的 QQ 号（admin_user_id），并使用该账号操作。")
             return
+        self._remember_platform(event)
         try:
             url = await self._login.start()
             admin_id = str(self.config.get("admin_user_id")).strip()
-            await self.context.send_message(
-                f"aiocqhttp:FriendMessage:{admin_id}",
+            platform_id = str(event.get_platform_id() or "").strip()
+            if not platform_id:
+                yield event.plain_result("网页登录入口已启动，但无法获取当前平台实例 ID，未发送私聊链接。请查看 AstrBot 日志。")
+                return
+            umo = f"{platform_id}:FriendMessage:{admin_id}"
+            sent = await self.context.send_message(
+                umo,
                 MessageChain([Plain("嘉立创临时登录入口（仅本人使用，勿转发）：\n" + url)]),
             )
+            if not sent:
+                logger.error(
+                    f"[jlc_order] 登录链接发送失败 ({umo})："
+                    f"send_message 返回 {sent!r}"
+                )
+                yield event.plain_result(
+                    "网页登录已启动，但私聊链接发送失败（平台未接受消息）。"
+                    "请确认机器人已能主动私聊该 QQ，并检查 AstrBot 日志。"
+                )
+                return
             yield event.plain_result("已将临时网页登录入口私聊发送给你。请通过 Tailscale 打开链接，完成登录后点击页面底部的“完成登录并保存凭证”。")
         except Exception as e:
             logger.exception("[jlc_order] 启动网页登录失败")
@@ -366,6 +460,7 @@ class JlcOrderPlugin(Star):
         if not self._login_admin(event):
             yield event.plain_result("无权查看登录状态。")
             return
+        self._remember_platform(event)
         yield event.plain_result("嘉立创网页登录状态\n" + self._login.status_text())
 
     @filter.command("jlc退出登录")
@@ -373,5 +468,6 @@ class JlcOrderPlugin(Star):
         if not self._login_admin(event):
             yield event.plain_result("无权执行退出登录。")
             return
+        self._remember_platform(event)
         await self._login.logout()
         yield event.plain_result("已清除插件保存的嘉立创登录凭证和浏览器会话。")
