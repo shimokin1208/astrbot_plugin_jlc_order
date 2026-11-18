@@ -94,15 +94,14 @@ class JlcMobileLogin:
             raise
         from urllib.parse import quote
         endpoint = f"http://{self.host}:{self.port}"
-        return f"http://{self.host}:{self.port}/open?key={quote(self.key, safe="")}"
+        return f"http://{self.host}:{self.port}/open?key={quote(self.key, safe=chr(0))}".replace(chr(0), "")
 
     async def _open_page(self, request):
         if not self._authorized(request):
             raise web.HTTPForbidden(text="配对链接已失效，请重新发送 /jlc登录")
         from urllib.parse import quote
         endpoint = f"http://{self.host}:{self.port}"
-        deep_link = f"jlcorder://login?server={quote(endpoint, safe=chr(0))}&key={quote(self.key, safe=chr(0))}"
-        deep_link = deep_link.replace(chr(0), "")
+        deep_link = f"jlcorder://login?server={quote(endpoint, safe=chr(0))}&key={quote(self.key, safe=chr(0))}".replace(chr(0), "")
         html = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         <title>打开嘉立创登录助手</title><style>body{font:16px system-ui;padding:28px;line-height:1.7}a{display:block;padding:14px;background:#1677ff;color:white;text-decoration:none;border-radius:8px;text-align:center}</style>
         <h3>嘉立创手机登录</h3><p>请确认已安装嘉立创登录助手 APK，并且手机已连接 Tailscale。</p>
