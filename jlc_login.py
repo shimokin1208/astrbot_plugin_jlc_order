@@ -141,8 +141,18 @@ class JlcWebLogin:
 
     async def start(self) -> str:
         async with self._lock:
-            if self.runner:
+            # 只有浏览器和 HTTP 服务都仍然有效时才复用旧入口。
+            if self.runner and self.context:
                 return f"http://{self.host}:{self.port}/?key={self.key}"
+            # 登录完成后会短暂保留 HTTP 服务展示结果页；若此时再次登录，
+            # 先清理旧服务，避免返回已经失效的旧入口。
+            if self.runner:
+                try:
+                    await self.runner.cleanup()
+                except Exception:
+                    pass
+                self.runner = self.site = None
+            self.key = secrets.token_urlsafe(24)
             try:
                 from playwright.async_api import async_playwright
             except ImportError as exc:
@@ -297,10 +307,14 @@ class JlcWebLogin:
         return web.json_response({"ok": False, "message": message, "detail": detail})
 
     async def _stop_server(self):
+        # 只清理本次登录留下的服务，避免误关掉紧接着启动的新会话。
+        runner = self.runner
         await asyncio.sleep(1)
-        if self.runner:
-            await self.runner.cleanup()
-        self.runner = self.site = None
+        if runner and self.runner is runner:
+            try:
+                await runner.cleanup()
+            finally:
+                self.runner = self.site = None
 
     async def close(self, keep_server=False):
         if self.context:
