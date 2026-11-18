@@ -1,5 +1,7 @@
 param([Parameter(Mandatory=$true)][string]$MiniPcTailscaleIp)
 $ErrorActionPreference = "Stop"
+$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw "请使用管理员身份打开 PowerShell 后再运行此脚本，以便添加仅限 Tailscale 的防火墙规则。" }
 if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) { throw "未找到 Tailscale，请先安装并登录。" }
 $windowsTsIp = (& tailscale ip -4 | Select-Object -First 1).Trim()
 if (-not $windowsTsIp) { throw "无法获取本机 Tailscale IPv4 地址。" }
