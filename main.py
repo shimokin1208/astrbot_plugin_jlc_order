@@ -12,7 +12,7 @@ from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.api.message_components import Plain
 
-from .jlc_login import JlcWebLogin
+from .mobile_login import JlcMobileLogin
 
 
 ORDER_LIST_URL = "https://m.jlc.com/api/overseas-pcb-order/order/getOrderPageList"
@@ -53,7 +53,7 @@ class JlcOrderPlugin(Star):
             except OSError:
                 pass
         self._state_file = self._data_dir / "last_state.json"
-        self._login = JlcWebLogin(self._data_dir)
+        self._login = JlcMobileLogin(self._data_dir)
         self._login.notify_callback = self._notify_admin
         self._last_error_notified = ""
         self._load_state()
@@ -423,7 +423,7 @@ class JlcOrderPlugin(Star):
 
     @filter.command("jlc登录")
     async def cmd_login(self, event: AstrMessageEvent):
-        """启动一次性 Tailscale 网页登录入口。"""
+        """生成一次性安卓手机登录配对链接。"""
         if not self._login_admin(event):
             yield event.plain_result("无权发起登录。请先在插件配置中填写自己的 QQ 号（admin_user_id），并使用该账号操作。")
             return
@@ -433,22 +433,22 @@ class JlcOrderPlugin(Star):
             group_id = str(event.get_group_id() or "").strip()
             if not group_id:
                 yield event.plain_result(
-                    "嘉立创临时登录入口（仅本人使用，勿转发）：\n"
+                    "嘉立创安卓登录入口（仅本人使用，勿转发）：\n"
                     + url
-                    + "\n\n请确保手机或电脑已连接 Tailscale，再打开链接。"
+                    + "\n\n请确保手机已连接 Tailscale，并已安装嘉立创登录助手 APK。点击链接后选择用登录助手打开。配对链接 10 分钟后失效。"
                 )
                 return
             platform_id = str(event.get_platform_id() or "").strip()
             admin_id = str(self.config.get("admin_user_id") or "").strip()
             if not platform_id:
-                yield event.plain_result("登录页面已启动，但无法获取平台实例，请改为私聊机器人发送 /jlc登录。")
+                yield event.plain_result("登录配对已启动，但无法获取平台实例，请改为私聊机器人发送 /jlc登录。")
                 return
             umo = f"{platform_id}:FriendMessage:{admin_id}"
-            sent = await self.context.send_message(umo, MessageChain([Plain("嘉立创临时登录入口（仅本人使用，勿转发）：\n" + url)]))
+            sent = await self.context.send_message(umo, MessageChain([Plain("嘉立创安卓登录入口（仅本人使用，勿转发）：\n" + url + "\n\n请在已连接 Tailscale 的安卓手机上打开，配对链接 10 分钟后失效。")]))
             if not sent:
-                yield event.plain_result("登录页面已启动，但私聊链接发送失败。请改为私聊机器人发送 /jlc登录。")
+                yield event.plain_result("登录配对已启动，但私聊链接发送失败。请改为私聊机器人发送 /jlc登录。")
                 return
-            yield event.plain_result("登录链接已私聊发送给管理员。")
+            yield event.plain_result("安卓登录配对链接已私聊发送给管理员。请在手机安装 APK 并点击链接。")
         except Exception as e:
             logger.exception("[jlc_order] 启动网页登录失败")
             yield event.plain_result(f"无法启动网页登录：{e}")
