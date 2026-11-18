@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.api.message_components import Plain
 
@@ -38,7 +38,7 @@ class JlcOrderPlugin(Star):
             / "plugins_data"
             / "astrbot_plugin_jlc_order"
         )
-        self._data_dir = Star.get_data_dir("astrbot_plugin_jlc_order")
+        self._data_dir = StarTools.get_data_dir("astrbot_plugin_jlc_order")
         self._data_dir.mkdir(parents=True, exist_ok=True)
         if legacy_dir.exists() and legacy_dir.resolve() != self._data_dir.resolve():
             for item in legacy_dir.iterdir():
@@ -58,7 +58,7 @@ class JlcOrderPlugin(Star):
     def _load_state(self):
         if self._state_file.exists():
             try:
-                data = json.loads(self._state_file.read_text(encoding="utf-8"))
+                data = json.loads(self._state_file.read_text(encoding="utf-8-sig"))
                 self._last_snapshot_hash = data.get("hash")
                 self._admin_platform_id = str(data.get("platform_id") or "").strip() or None
             except Exception as e:
