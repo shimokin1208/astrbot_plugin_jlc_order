@@ -36,7 +36,7 @@ class JlcMobileLogin:
         result = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=5)
         ip = result.stdout.strip().splitlines()[0] if result.returncode == 0 and result.stdout.strip() else ""
         parts = ip.split(".")
-        if len(parts) != 4 or not parts[0].isdigit() or int(parts[0]) != 100:
+        if len(parts) != 4 or parts[0] != "100" or not parts[1].isdigit() or not 64 <= int(parts[1]) <= 127 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in parts[2:]):
             raise RuntimeError("无法获取有效的 Tailscale IPv4 地址，已拒绝启动登录服务。")
         return ip
 
@@ -82,6 +82,7 @@ class JlcMobileLogin:
         self.last_event = "已创建 10 分钟有效的一次性手机配对"
         app = web.Application(client_max_size=16 * 1024)
         app.router.add_get("/health", self._health)
+        app.router.add_get("/open", self._open_page)
         app.router.add_post("/token", self._receive_token)
         self.runner = web.AppRunner(app, access_log=None)
         await self.runner.setup()
@@ -93,8 +94,20 @@ class JlcMobileLogin:
             raise
         from urllib.parse import quote
         endpoint = f"http://{self.host}:{self.port}"
-        return f"jlcorder://login?server={quote(endpoint, safe='')}&key={quote(self.key, safe='')}"
+        return f"http://{self.host}:{self.port}/open?key={quote(self.key, safe="")}"
 
+    async def _open_page(self, request):
+        if not self._authorized(request):
+            raise web.HTTPForbidden(text="配对链接已失效，请重新发送 /jlc登录")
+        from urllib.parse import quote
+        endpoint = f"http://{self.host}:{self.port}"
+        deep_link = f"jlcorder://login?server={quote(endpoint, safe=chr(0))}&key={quote(self.key, safe=chr(0))}"
+        deep_link = deep_link.replace(chr(0), "")
+        html = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>打开嘉立创登录助手</title><style>body{font:16px system-ui;padding:28px;line-height:1.7}a{display:block;padding:14px;background:#1677ff;color:white;text-decoration:none;border-radius:8px;text-align:center}</style>
+        <h3>嘉立创手机登录</h3><p>请确认已安装嘉立创登录助手 APK，并且手机已连接 Tailscale。</p>
+        <a href="DEEP_LINK">打开嘉立创登录助手</a><p>如果没有自动跳转，请点击上方按钮。</p>"""
+        return web.Response(text=html.replace("DEEP_LINK", deep_link), content_type="text/html")
     async def _health(self, request):
         if not self._authorized(request):
             raise web.HTTPForbidden(text="Pairing link expired or invalid")
